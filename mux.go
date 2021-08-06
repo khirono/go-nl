@@ -7,7 +7,7 @@ import (
 
 type Mux struct {
 	epfd int
-	es   map[int]*muxEntry
+	es   map[int]muxEntry
 	mu   sync.Mutex
 }
 
@@ -18,7 +18,7 @@ func NewMux() (*Mux, error) {
 		return nil, err
 	}
 	m.epfd = fd
-	m.es = make(map[int]*muxEntry)
+	m.es = make(map[int]muxEntry)
 	return m, nil
 }
 
@@ -32,17 +32,13 @@ func (m *Mux) PushHandler(conn *Conn, handler Handler) error {
 	defer m.mu.Unlock()
 	e, ok := m.es[fd]
 	if ok {
-		e.handlers = append(e.handlers, handler)
+		e.handlers = append([]Handler{handler}, e.handlers...)
+		m.es[fd] = e
 		return nil
 	}
-	e = newmuxEntry(conn)
-	e.handlers = append(e.handlers, handler)
-	m.es[fd] = e
-	event := &syscall.EpollEvent{
-		Events: syscall.EPOLLIN,
-		Fd:     int32(fd),
-	}
-	return syscall.EpollCtl(m.epfd, syscall.EPOLL_CTL_ADD, fd, event)
+	buf := make([]byte, 64*1024)
+	m.es[fd] = muxEntry{conn, buf, HandlerStack{handler}}
+	return m.subscribe(fd)
 }
 
 func (m *Mux) PushHandlerFunc(conn *Conn, f func(msg *Msg) bool) error {
@@ -59,11 +55,12 @@ func (m *Mux) PopHandler(conn *Conn) {
 	}
 	n := len(e.handlers)
 	if n <= 1 {
-		syscall.EpollCtl(m.epfd, syscall.EPOLL_CTL_DEL, fd, nil)
+		m.unsubscribe(fd)
 		delete(m.es, fd)
 		return
 	}
-	e.handlers = e.handlers[:n]
+	e.handlers = append([]Handler{}, e.handlers[1:]...)
+	m.es[fd] = e
 }
 
 func (m *Mux) Serve() error {
@@ -73,18 +70,44 @@ func (m *Mux) Serve() error {
 		if err != nil {
 			return err
 		}
-		for _, event := range events {
-			m.mu.Lock()
-			e, ok := m.es[int(event.Fd)]
-			if !ok {
-				m.mu.Unlock()
-				continue
-			}
-			e.ServeConn()
+		event := events[0]
+
+		fd := int(event.Fd)
+		m.unsubscribe(fd)
+		m.mu.Lock()
+		e, ok := m.es[fd]
+		if !ok {
 			m.mu.Unlock()
+			continue
 		}
+		m.mu.Unlock()
+		b, err := e.ReadBytes()
+		if err != nil {
+			continue
+		}
+		go func() {
+			e.Serve(b)
+			m.mu.Lock()
+			_, ok := m.es[fd]
+			if ok {
+				m.subscribe(fd)
+			}
+			m.mu.Unlock()
+		}()
 	}
 	return nil
+}
+
+func (m *Mux) subscribe(fd int) error {
+	event := &syscall.EpollEvent{
+		Events: syscall.EPOLLIN,
+		Fd:     int32(fd),
+	}
+	return syscall.EpollCtl(m.epfd, syscall.EPOLL_CTL_ADD, fd, event)
+}
+
+func (m *Mux) unsubscribe(fd int) error {
+	return syscall.EpollCtl(m.epfd, syscall.EPOLL_CTL_DEL, fd, nil)
 }
 
 type muxEntry struct {
@@ -93,20 +116,17 @@ type muxEntry struct {
 	handlers HandlerStack
 }
 
-func newmuxEntry(conn *Conn) *muxEntry {
-	e := new(muxEntry)
-	e.conn = conn
-	e.buf = make([]byte, 64*1024)
-	return e
-}
-
-func (e *muxEntry) ServeConn() error {
+func (e muxEntry) ReadBytes() ([]byte, error) {
 	n, err := e.conn.Read(e.buf)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	b := make([]byte, n)
 	copy(b, e.buf[:n])
+	return b, nil
+}
+
+func (e muxEntry) Serve(b []byte) error {
 	off := 0
 	for off < len(b) {
 		msg, n, err := DecodeMsg(b[off:])
@@ -131,10 +151,9 @@ func (f HandlerFunc) ServeMsg(msg *Msg) bool {
 
 type HandlerStack []Handler
 
-func (hl HandlerStack) ServeMsg(msg *Msg) bool {
-	n := len(hl)
-	for i := n - 1; i >= 0; i-- {
-		if hl[i].ServeMsg(msg) {
+func (hs HandlerStack) ServeMsg(msg *Msg) bool {
+	for _, h := range hs {
+		if h.ServeMsg(msg) {
 			return true
 		}
 	}
