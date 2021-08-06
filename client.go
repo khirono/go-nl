@@ -7,6 +7,7 @@ import (
 type Client struct {
 	conn   *Conn
 	mux    *Mux
+	done   chan struct{}
 	ch     chan *Msg
 	reqhdr Header
 }
@@ -27,6 +28,9 @@ func (c *Client) Do(req *Request) ([]Msg, error) {
 	}
 	c.reqhdr = req.Header
 
+	c.done = make(chan struct{})
+	defer close(c.done)
+
 	c.ch = make(chan *Msg, 1)
 	defer close(c.ch)
 
@@ -44,7 +48,7 @@ func (c *Client) Do(req *Request) ([]Msg, error) {
 			return rsps, err
 		default:
 			rsps = append(rsps, *msg)
-			if msg.Header.Flags&syscall.NLM_F_MULTI == 0 {
+			if c.reqhdr.Flags&syscall.NLM_F_DUMP == 0 {
 				return rsps, nil
 			}
 		}
@@ -67,6 +71,10 @@ func (c *Client) ServeMsg(msg *Msg) bool {
 	if msg.Header.Pid == 0 {
 		return false
 	}
-	c.ch <- msg
+	select {
+	case <-c.done:
+		return false
+	case c.ch <- msg:
+	}
 	return true
 }
