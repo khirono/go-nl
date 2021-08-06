@@ -6,6 +6,10 @@ import (
 	"syscall"
 )
 
+const (
+	NLA_TYPE_MASK = ^uint16(syscall.NLA_F_NESTED | syscall.NLA_F_NET_BYTEORDER)
+)
+
 type AttrLen uint16
 
 func (l AttrLen) Align() int {
@@ -25,6 +29,18 @@ func DecodeAttrHdr(b []byte) (AttrHdr, int, error) {
 	hdr.Len = AttrLen(native.Uint16(b[0:2]))
 	hdr.Type = native.Uint16(b[2:4])
 	return hdr, 4, nil
+}
+
+func (h AttrHdr) MaskedType() int {
+	return int(h.Type & NLA_TYPE_MASK)
+}
+
+func (h AttrHdr) Nested() bool {
+	return h.Type&syscall.NLA_F_NESTED != 0
+}
+
+func (h AttrHdr) NetByteorder() bool {
+	return h.Type&syscall.NLA_F_NET_BYTEORDER != 0
 }
 
 type Attr struct {

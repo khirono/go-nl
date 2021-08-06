@@ -53,7 +53,7 @@ func TestAttr_Encode(t *testing.T) {
 func TestDecodeAttr(t *testing.T) {
 	data := []byte{
 		0x20, 0x00,
-		0x01, 0x00,
+		0x01, 0x80,
 		0x08, 0x00,
 		0x02, 0x00,
 		0x9a, 0x78, 0x00, 0x00,
@@ -68,8 +68,14 @@ func TestDecodeAttr(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hdr.Type != 1 {
-		t.Errorf("want: %v; but got %v\n", 1, hdr.Type)
+	if hdr.MaskedType() != 1 {
+		t.Errorf("want: %v; but got %v\n", 1, hdr.MaskedType())
+	}
+	if !hdr.Nested() {
+		t.Errorf("want: true; but got %v\n", hdr.Nested())
+	}
+	if hdr.NetByteorder() {
+		t.Errorf("want: false; but got %v\n", hdr.NetByteorder())
 	}
 	if hdr.Len != 32 {
 		t.Errorf("want: %v; but got %v\n", 32, hdr.Len)
