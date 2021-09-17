@@ -182,6 +182,21 @@ func (u AttrU8) Encode(b []byte) (int, error) {
 	return 1, nil
 }
 
+type AttrBytes []byte
+
+func DecodeAttrBytes(b []byte) ([]byte, int, error) {
+	return b, len(b), nil
+}
+
+func (b AttrBytes) Len() int {
+	return len(b)
+}
+
+func (b AttrBytes) Encode(p []byte) (int, error) {
+	n := copy(p, b)
+	return n, nil
+}
+
 type AttrString string
 
 func DecodeAttrString(b []byte) (string, int, error) {
