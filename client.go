@@ -5,11 +5,11 @@ import (
 )
 
 type Client struct {
-	conn   *Conn
-	mux    *Mux
-	done   chan struct{}
-	ch     chan *Msg
-	reqhdr Header
+	conn *Conn
+	mux  *Mux
+	done chan struct{}
+	ch   chan *Msg
+	req  *Request
 }
 
 func NewClient(conn *Conn, mux *Mux) *Client {
@@ -26,7 +26,7 @@ func (c *Client) Do(req *Request) ([]Msg, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.reqhdr = req.Header
+	c.req = req
 
 	c.done = make(chan struct{})
 	defer close(c.done)
@@ -48,7 +48,7 @@ func (c *Client) Do(req *Request) ([]Msg, error) {
 			return rsps, err
 		default:
 			rsps = append(rsps, *msg)
-			if c.reqhdr.Flags&syscall.NLM_F_DUMP == 0 {
+			if c.req.Header.Flags&syscall.NLM_F_DUMP == 0 {
 				return rsps, nil
 			}
 		}
@@ -58,14 +58,15 @@ func (c *Client) Do(req *Request) ([]Msg, error) {
 }
 
 func (c *Client) ServeMsg(msg *Msg) bool {
-	switch msg.Header.Type {
-	case syscall.NLMSG_DONE:
-	case syscall.NLMSG_ERROR:
-	case c.reqhdr.Type:
+	t := msg.Header.Type
+	switch {
+	case t == syscall.NLMSG_DONE:
+	case t == syscall.NLMSG_ERROR:
+	case c.req.ContainsReplyType(int(t)):
 	default:
 		return false
 	}
-	if msg.Header.Seq != c.reqhdr.Seq {
+	if msg.Header.Seq != c.req.Header.Seq {
 		return false
 	}
 	if msg.Header.Pid == 0 {
