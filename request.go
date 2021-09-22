@@ -26,6 +26,9 @@ func NewRequest(typ, flags int) *Request {
 
 func (r *Request) Append(e Encoder) error {
 	l := e.Len()
+	if l == 0 {
+		return nil
+	}
 	b := make([]byte, l)
 	_, err := e.Encode(b)
 	if err != nil {
@@ -37,6 +40,9 @@ func (r *Request) Append(e Encoder) error {
 
 func (r *Request) AppendBytes(b []byte) {
 	l := len(b)
+	if l == 0 {
+		return
+	}
 	r.Header.Len += uint32(l)
 	iov := syscall.Iovec{Base: &b[0], Len: uint64(l)}
 	r.Iovs = append(r.Iovs, iov)
