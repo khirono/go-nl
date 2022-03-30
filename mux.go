@@ -7,6 +7,7 @@ import (
 
 type Mux struct {
 	epfd int
+	cfds [2]int
 	es   map[int]muxEntry
 	mu   sync.Mutex
 }
@@ -19,11 +20,17 @@ func NewMux() (*Mux, error) {
 	}
 	m.epfd = fd
 	m.es = make(map[int]muxEntry)
+	err = syscall.Pipe(m.cfds[:])
+	if err != nil {
+		syscall.Close(m.epfd)
+		return nil, err
+	}
+	m.subscribe(m.cfds[0])
 	return m, nil
 }
 
 func (m *Mux) Close() {
-	syscall.Close(m.epfd)
+	syscall.Close(m.cfds[1])
 }
 
 func (m *Mux) PushHandler(conn *Conn, handler Handler) error {
@@ -64,16 +71,25 @@ func (m *Mux) PopHandler(conn *Conn) {
 }
 
 func (m *Mux) Serve() error {
+	defer syscall.Close(m.epfd)
+	defer syscall.Close(m.cfds[0])
+	defer syscall.Close(m.cfds[1])
 	events := make([]syscall.EpollEvent, 1)
 	for {
 		_, err := syscall.EpollWait(m.epfd, events, -1)
 		if err != nil {
+			if err == syscall.EINTR {
+				continue
+			}
 			return err
 		}
 		event := events[0]
 
 		fd := int(event.Fd)
 		m.unsubscribe(fd)
+		if fd == m.cfds[0] {
+			break
+		}
 		m.mu.Lock()
 		e, ok := m.es[fd]
 		if !ok {
