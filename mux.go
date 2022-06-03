@@ -33,7 +33,7 @@ func (m *Mux) Close() {
 	syscall.Close(m.cfds[1])
 }
 
-func (m *Mux) PushHandler(conn *Conn, handler Handler) error {
+func (m *Mux) PushHandler(conn Conner, handler Handler) error {
 	fd := conn.Fd()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -48,11 +48,11 @@ func (m *Mux) PushHandler(conn *Conn, handler Handler) error {
 	return m.subscribe(fd)
 }
 
-func (m *Mux) PushHandlerFunc(conn *Conn, f func(msg *Msg) bool) error {
+func (m *Mux) PushHandlerFunc(conn Conner, f func(msg *Msg) bool) error {
 	return m.PushHandler(conn, HandlerFunc(f))
 }
 
-func (m *Mux) PopHandler(conn *Conn) {
+func (m *Mux) PopHandler(conn Conner) {
 	fd := conn.Fd()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -127,7 +127,7 @@ func (m *Mux) unsubscribe(fd int) error {
 }
 
 type muxEntry struct {
-	conn     *Conn
+	conn     Conner
 	buf      []byte
 	handlers HandlerStack
 }

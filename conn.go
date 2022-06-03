@@ -6,6 +6,15 @@ import (
 	"unsafe"
 )
 
+type Conner interface {
+	Fd() int
+	Close()
+	Read([]byte) (int, error)
+	Write([]byte) (int, error)
+	Writev([]syscall.Iovec) (int, error)
+	TakeSeq() int
+}
+
 type Conn struct {
 	fd  int
 	seq int
