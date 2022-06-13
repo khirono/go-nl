@@ -29,6 +29,7 @@ func (c *Client) Do(req *Request) ([]Msg, error) {
 	c.req = req
 
 	c.ch = make(chan *Msg, 1)
+	c.done = false
 
 	c.mux.PushHandler(c.conn, c)
 	defer c.mux.PopHandler(c.conn)
