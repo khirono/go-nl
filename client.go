@@ -28,7 +28,7 @@ func (c *Client) Do(req *Request) ([]Msg, error) {
 	}
 	c.req = req
 
-	c.ch = make(chan *Msg, 1)
+	c.ch = make(chan *Msg, 32)
 	c.done = false
 
 	c.mux.PushHandler(c.conn, c)
@@ -72,15 +72,15 @@ func (c *Client) ServeMsg(msg *Msg) bool {
 	c.ch <- msg
 	switch t {
 	case syscall.NLMSG_DONE:
-		close(c.ch)
 		c.done = true
+		close(c.ch)
 	case syscall.NLMSG_ERROR:
-		close(c.ch)
 		c.done = true
+		close(c.ch)
 	default:
-		if c.req.Header.Flags&syscall.NLM_F_DUMP == 0 {
-			close(c.ch)
+		if !c.req.NeedAck() {
 			c.done = true
+			close(c.ch)
 		}
 	}
 	return true

@@ -86,7 +86,6 @@ func (m *Mux) Serve() error {
 		event := events[0]
 
 		fd := int(event.Fd)
-		m.unsubscribe(fd)
 		if fd == m.cfds[0] {
 			break
 		}
@@ -101,15 +100,7 @@ func (m *Mux) Serve() error {
 		if err != nil {
 			continue
 		}
-		go func() {
-			e.Serve(b)
-			m.mu.Lock()
-			_, ok := m.es[fd]
-			if ok {
-				m.subscribe(fd)
-			}
-			m.mu.Unlock()
-		}()
+		e.Serve(b)
 	}
 	return nil
 }
