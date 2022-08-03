@@ -69,3 +69,13 @@ func (r *Request) ContainsReplyType(typ int) bool {
 	_, ok := r.ReplyType[uint16(typ)]
 	return ok
 }
+
+func (r *Request) NeedAck() bool {
+	if r.Header.Flags&syscall.NLM_F_ACK != 0 {
+		return true
+	}
+	if r.Header.Flags&syscall.NLM_F_DUMP != 0 {
+		return true
+	}
+	return false
+}
