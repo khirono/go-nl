@@ -7,9 +7,6 @@ import (
 type Client struct {
 	conn Conner
 	mux  *Mux
-	done bool
-	ch   chan *Msg
-	req  *Request
 }
 
 func NewClient(conn Conner, mux *Mux) *Client {
@@ -26,16 +23,14 @@ func (c *Client) Do(req *Request) ([]Msg, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.req = req
 
-	c.ch = make(chan *Msg, 32)
-	c.done = false
+	ch := make(chan *Msg, 32)
 
-	c.mux.PushHandler(c.conn, c)
+	c.mux.PushHandlerFunc(c.conn, c.Handler(req, ch))
 	defer c.mux.PopHandler(c.conn)
 
 	var rsps []Msg
-	for msg := range c.ch {
+	for msg := range ch {
 		switch msg.Header.Type {
 		case syscall.NLMSG_DONE:
 			err, _, _ := DecodeMsgError(msg.Body)
@@ -51,37 +46,40 @@ func (c *Client) Do(req *Request) ([]Msg, error) {
 	return rsps, nil
 }
 
-func (c *Client) ServeMsg(msg *Msg) bool {
-	if c.done {
-		return false
-	}
-	t := msg.Header.Type
-	switch {
-	case t == syscall.NLMSG_DONE:
-	case t == syscall.NLMSG_ERROR:
-	case c.req.ContainsReplyType(int(t)):
-	default:
-		return false
-	}
-	if msg.Header.Seq != c.req.Header.Seq {
-		return false
-	}
-	if msg.Header.Pid == 0 {
-		return false
-	}
-	c.ch <- msg
-	switch t {
-	case syscall.NLMSG_DONE:
-		c.done = true
-		close(c.ch)
-	case syscall.NLMSG_ERROR:
-		c.done = true
-		close(c.ch)
-	default:
-		if !c.req.NeedAck() {
-			c.done = true
-			close(c.ch)
+func (c *Client) Handler(req *Request, ch chan *Msg) HandlerFunc {
+	var done bool
+	return func(msg *Msg) bool {
+		if done {
+			return false
 		}
+		t := msg.Header.Type
+		switch {
+		case t == syscall.NLMSG_DONE:
+		case t == syscall.NLMSG_ERROR:
+		case req.ContainsReplyType(int(t)):
+		default:
+			return false
+		}
+		if msg.Header.Seq != req.Header.Seq {
+			return false
+		}
+		if msg.Header.Pid == 0 {
+			return false
+		}
+		ch <- msg
+		switch t {
+		case syscall.NLMSG_DONE:
+			done = true
+			close(ch)
+		case syscall.NLMSG_ERROR:
+			done = true
+			close(ch)
+		default:
+			if !req.NeedAck() {
+				done = true
+				close(ch)
+			}
+		}
+		return true
 	}
-	return true
 }
