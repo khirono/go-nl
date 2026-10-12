@@ -6,10 +6,11 @@ import (
 )
 
 type Mux struct {
-	epfd int
-	cfds [2]int
-	es   map[int]muxEntry
-	mu   sync.Mutex
+	epfd      int
+	cfds      [2]int
+	es        map[int]muxEntry
+	mu        sync.Mutex
+	closeOnce sync.Once
 }
 
 func NewMux() (*Mux, error) {
@@ -29,8 +30,21 @@ func NewMux() (*Mux, error) {
 	return m, nil
 }
 
+// Close stops Serve. It may be called more than once, and before or after
+// Serve has returned.
 func (m *Mux) Close() {
-	syscall.Close(m.cfds[1])
+	m.closeWake()
+}
+
+// closeWake closes the write end of the wake pipe, which is what makes Serve's
+// EpollWait return. Close and Serve's exit both close it, and the fd number is
+// free for reuse the moment the first one does: a second close would shut
+// whatever socket or file the process opened in between. So only the first
+// call closes it.
+func (m *Mux) closeWake() {
+	m.closeOnce.Do(func() {
+		syscall.Close(m.cfds[1])
+	})
 }
 
 func (m *Mux) PushHandler(conn Conner, handler Handler) error {
@@ -73,7 +87,7 @@ func (m *Mux) PopHandler(conn Conner) {
 func (m *Mux) Serve() error {
 	defer syscall.Close(m.epfd)
 	defer syscall.Close(m.cfds[0])
-	defer syscall.Close(m.cfds[1])
+	defer m.closeWake()
 	events := make([]syscall.EpollEvent, 1)
 	for {
 		_, err := syscall.EpollWait(m.epfd, events, -1)
